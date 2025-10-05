@@ -5,10 +5,10 @@ import columnar.schema.DataType
 
 object Encoder:
 
-  private def encodeInt(value: Int): Array[Byte] =
+  def encodeInt(value: Int): Array[Byte] =
     ByteBuffer.allocate(4).putInt(value).array
 
-  private def encodeString(value: String): Array[Byte] =
+  def encodeString(value: String): Array[Byte] =
     val strBytes = value.getBytes("UTF-8")
     val length = strBytes.size
     val buffer = ByteBuffer.allocate(length + 4)
@@ -16,7 +16,7 @@ object Encoder:
     buffer.put(strBytes, 0, length)
     buffer.array()
 
-  private def encodeBoolean(value: Boolean): Array[Byte] =
+  def encodeBoolean(value: Boolean): Array[Byte] =
       Array[Byte](if value then 1 else 0)
 
   def encodeValue(value: Option[Any], dataType: DataType): Array[Byte] =

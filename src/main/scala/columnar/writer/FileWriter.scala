@@ -9,14 +9,13 @@ import columnar.schema.{Schema, Column, DataType}
 class FileWriter(schema: Schema):
 
   /**
-   * Converts row-oriented data to column-oriented chunks.
+   * Convert row data to column data
    */
-  private def rowsToColumns(rows: Seq[Map[String, Option[Any]]]): Seq[ColumnChunk] =
+  def rowsToColumns(rows: Seq[Map[String, Option[Any]]]): Seq[ColumnChunk] =
     schema.columns.map { column =>
       val columnName = column.name
       val allValues = rows.map(row => row.getOrElse(columnName, None))
 
-      // Encode each value
       val encodedBytes = allValues.flatMap { value =>
         Encoder.encodeValue(value, column.dataType)
       }
@@ -27,9 +26,9 @@ class FileWriter(schema: Schema):
   /**
    * Calculates the size of metadata for a single column.
    */
-  private def calculateMetadataSize(column: Column): Int =
+  def calculateMetadataSize(column: Column): Int =
     val nameBytes = column.name.getBytes("UTF-8")
-    4 +                  // name length (Int)
+      4 +                  // name length (Int)
       nameBytes.length +   // name bytes
       1 +                  // type code (Byte)
       1                    // nullable flag (Byte)
@@ -38,7 +37,12 @@ class FileWriter(schema: Schema):
    * Calculates all offsets and builds index entries.
    * This is the key method that determines where everything goes!
    */
-  private def buildIndexEntries(chunks: Seq[ColumnChunk]): Seq[ColumnIndexEntry] =
+  def buildIndexEntries(chunks: Seq[ColumnChunk]): Seq[ColumnIndexEntry] =
+    // Header (13 bytes)
+    // Index (# Columns * 24 bytes)
+    // Metadata (variable length)
+    // Data (Variable length)
+
     // Fixed sizes
     val headerSize = 13
     val indexSize = schema.columnCount * ColumnIndexEntry.ENTRY_SIZE
@@ -78,7 +82,7 @@ class FileWriter(schema: Schema):
    * - Number of columns (4 bytes)
    * - Number of rows (4 bytes)
    */
-  private def writeHeader(
+  def writeHeader(
                            out: DataOutputStream,
                            columnCount: Int,
                            rowCount: Int
@@ -92,7 +96,7 @@ class FileWriter(schema: Schema):
    * Writes the index section.
    * Each entry is 24 bytes (fixed size).
    */
-  private def writeIndex(
+  def writeIndex(
                           out: DataOutputStream,
                           indexEntries: Seq[ColumnIndexEntry]
                         ): Unit =
@@ -110,10 +114,10 @@ class FileWriter(schema: Schema):
    */
   private def writeColumnMetadata(out: DataOutputStream, column: Column): Unit =
     val nameBytes = column.name.getBytes("UTF-8")
-    out.writeInt(nameBytes.length)
-    out.write(nameBytes)
-    out.writeByte(column.dataType.typeCode)
-    out.writeByte(if column.nullable then 1 else 0)
+    out.writeInt(nameBytes.length) // name size
+    out.write(nameBytes) // name
+    out.writeByte(column.dataType.typeCode) // data type
+    out.writeByte(if column.nullable then 1 else 0) // nullable
 
   /**
    * Writes all column data to the file.
@@ -123,11 +127,8 @@ class FileWriter(schema: Schema):
    */
   private def writeColumnData(out: DataOutputStream, chunks: Seq[ColumnChunk]): Unit =
     chunks.foreach { chunk =>
-      // Write the size of this column's data
-      out.writeInt(chunk.sizeInBytes)
-
-      // Write the actual data bytes
-      out.write(chunk.values)
+      out.writeInt(chunk.sizeInBytes) // size
+      out.write(chunk.values) // data
     }
 
   /**
@@ -142,27 +143,16 @@ class FileWriter(schema: Schema):
    * 6. Write data
    */
   def write(rows: Seq[Map[String, Option[Any]]], filePath: String): Unit =
-    // Step 1: Convert rows to columns
     val chunks = rowsToColumns(rows)
+    val indexEntries = buildIndexEntries(chunks) // Build index with calculated offsets
 
-    // Step 2: Build index with calculated offsets
-    val indexEntries = buildIndexEntries(chunks)
-
-    // Step 3: Open file and write everything
     val fos = new FileOutputStream(filePath)
     val out = new DataOutputStream(fos)
 
     try
-      // Write header
       writeHeader(out, schema.columnCount, rows.size)
-
-      // Write index (NEW!)
       writeIndex(out, indexEntries)
-
-      // Write schema metadata for each column
       schema.columns.foreach(col => writeColumnMetadata(out, col))
-
-      // Write column data
       writeColumnData(out, chunks)
 
       println(s"Successfully wrote file: $filePath")

@@ -1,6 +1,6 @@
 package columnar.writer
 
-import java.io.{FileOutputStream, DataOutputStream, DataInputStream}
+import java.io.{RandomAccessFile, DataOutputStream, DataInputStream}
 
 case class ColumnIndexEntry(metadataOffset: Long, dataOffset: Long, dataSize: Int):
   // metadataOffset: where does metadata start, data offset: where does column data start, data size: how much column dat
@@ -24,6 +24,13 @@ object ColumnIndexEntry:
     val dataOffset = in.readLong()
     val dataSize = in.readInt()
     in.readInt()  // skip reserved
+    ColumnIndexEntry(metadataOffset, dataOffset, dataSize)
+
+  def readFromStream(raf: RandomAccessFile): ColumnIndexEntry =
+    val metadataOffset = raf.readLong()
+    val dataOffset = raf.readLong()
+    val dataSize = raf.readInt()
+    raf.readInt() // skip reserved padding
     ColumnIndexEntry(metadataOffset, dataOffset, dataSize)
 
 end ColumnIndexEntry
