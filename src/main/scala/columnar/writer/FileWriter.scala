@@ -8,6 +8,19 @@ import columnar.schema.{Schema, Column, DataType}
  */
 class FileWriter(schema: Schema):
 
+    /** Builds a null bitmap (1 bit per row, 1 = NULL) */
+  private def buildNullBitmap(values: Seq[Option[Any]]): Array[Byte] =
+    val n = values.length
+    val bytes = new Array[Byte]((n + 7) / 8)
+    var i = 0
+    while i < n do
+      if values(i).isEmpty then
+        val b = i >>> 3 // byte index
+        val bit = i & 7 // bit index (0–7)
+        bytes(b) = (bytes(b) | (1 << bit)).toByte
+      i += 1
+    bytes
+
   /**
    * Convert row data to column data
    */
@@ -16,11 +29,10 @@ class FileWriter(schema: Schema):
       val columnName = column.name
       val allValues = rows.map(row => row.getOrElse(columnName, None))
 
-      val encodedBytes = allValues.flatMap { value =>
-        Encoder.encodeValue(value, column.dataType)
-      }
-
-      ColumnChunk(column, encodedBytes.toArray, rows.size)
+      val bitmap = buildNullBitmap(allValues)
+      val encoded = allValues.flatMap(v => Encoder.encodeValue(v, column.dataType))
+      val combined = bitmap ++ encoded.toArray // bitmap, then column data encodings
+      ColumnChunk(column, combined, rows.size)
     }
 
   /**

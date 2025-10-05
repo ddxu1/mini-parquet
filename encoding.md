@@ -50,9 +50,12 @@ A compact, column-oriented binary format inspired by Apache Parquet.
 
 ## 🧮 Section 4: Column Data
 
-| Component | Description |
-|------------|-------------|
-| 4 bytes (Int) | Data size |
-| N bytes | Concatenated encoded values |
+| Component     | Description                 |
+|---------------|-----------------------------|
+| 4 bytes (Int) | Data size                   |
+ | M bytes       | Null Bitmap                 | 
+| N bytes       | Concatenated encoded values |
 
 ---
+
+

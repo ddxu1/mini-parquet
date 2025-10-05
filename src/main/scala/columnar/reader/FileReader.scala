@@ -4,7 +4,7 @@ import java.io.{File, RandomAccessFile}
 import java.nio.ByteBuffer
 import columnar.schema.{Column, DataType, Schema}
 import columnar.writer.ColumnIndexEntry
-
+import java.nio.charset.StandardCharsets
 import scala.collection.mutable
 
 
@@ -12,9 +12,10 @@ class FileReader(filePath: String):
   private val raf = new RandomAccessFile(new File(filePath), "r")
   /** Reads 13 byte header */
   private def readHeader(): FileHeader =
+    raf.seek(0) // just in case, ensure we start at 0
     val magic = new Array[Byte](4)
     raf.readFully(magic)
-    val magicStr = String(magic)
+    val magicStr = String(magic, StandardCharsets.UTF_8)
     require(magicStr == "COLF", s"Invalid file format: magic bytes $magicStr")
     val version = raf.readByte()
     val columnCount = raf.readInt()
@@ -37,7 +38,7 @@ class FileReader(filePath: String):
       val nameLen = raf.readInt()
       val nameBytes = new Array[Byte](nameLen)
       raf.readFully(nameBytes)
-      val name = String(nameBytes, java.nio.charset.StandardCharsets.UTF_8)
+      val name = String(nameBytes, StandardCharsets.UTF_8)
       val typeCode = raf.readByte()
       val nullable = raf.readByte() == 1.toByte
       val dataType = typeCode match
@@ -63,29 +64,40 @@ class FileReader(filePath: String):
     decodeColumn(data, col.dataType, header.rowCount)
 
   private def decodeColumn(data: Array[Byte], dataType: DataType, rowCount: Int): Seq[Option[Any]] =
-    val buf = ByteBuffer.wrap(data)
-    dataType match
-      case DataType.IntegerType =>
-        (0 until rowCount).map {_ =>
-          if buf.remaining() >= 4 then Some(buf.getInt()) else None
-        }
-      case DataType.BooleanType =>
-        (0 until rowCount).map { _ =>
-          if buf.remaining() >= 1 then Some(buf.get() == 1.toByte) else None
-        }
-      case DataType.StringType =>
-        val values = collection.mutable.Buffer.empty[Option[Any]]
-        var i = 0
-        while buf.remaining() >= 4 && i < rowCount do
-          val len = buf.getInt()
-          val strBytes = new Array[Byte](len)
-          buf.get(strBytes)
-          values.append(Some(String(strBytes)))
-          i += 1
-        values.toSeq
-      case _ =>
-        throw new IllegalArgumentException(s"Unsupported type $dataType")
+      val buf = ByteBuffer.wrap(data)
+      val bitmapLength = (rowCount + 7) / 8
+      val bitmap = new Array[Byte](bitmapLength) // Read null bitmap (1 bit per row; 1 = NULL)
+      if buf.remaining() < bitmapLength then return Seq.fill(rowCount)(None)
+      buf.get(bitmap)
 
+      inline def isNull(i: Int): Boolean =
+          val b = bitmap(i >>> 3)
+          val bit = i & 7
+          (b & (1 << bit)).toByte != 0
+
+      val out = scala.collection.mutable.ArrayBuffer.empty[Option[Any]]
+      var i = 0
+      while i < rowCount do
+        if isNull(i) then out += None
+        else
+          dataType match
+            case DataType.IntegerType =>
+              if buf.remaining() >= 4 then out += Some(buf.getInt()) else out += None
+            case DataType.BooleanType =>
+              if buf.remaining() >= 1 then out += Some(buf.get() == 1.toByte) else out += None
+            case DataType.StringType =>
+              if buf.remaining() >= 4 then
+                val len = buf.getInt()
+                if len >= 0 && buf.remaining() >= len then
+                  val strBytes = new Array[Byte](len)
+                  buf.get(strBytes)
+                  out += Some(String(strBytes, java.nio.charset.StandardCharsets.UTF_8))
+                else out += None
+              else out += None
+            case null =>
+              out += None
+        i += 1
+      out.toSeq
 
   def readAllColumns(): Seq[Map[String, Option[Any]]] =
     val header = readHeader()
