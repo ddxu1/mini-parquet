@@ -76,6 +76,7 @@ class FileReader(filePath: String):
           (b & (1 << bit)).toByte != 0
 
       val out = scala.collection.mutable.ArrayBuffer.empty[Option[Any]]
+      out.sizeHint(rowCount)  // Pre-allocate to avoid reallocations
       var i = 0
       while i < rowCount do
         if isNull(i) then out += None
@@ -97,7 +98,7 @@ class FileReader(filePath: String):
             case null =>
               out += None
         i += 1
-      out.toSeq
+      out.toIndexedSeq  // Use IndexedSeq for O(1) random access
 
   def readAllColumns(): Seq[Map[String, Option[Any]]] =
     val header = readHeader()
