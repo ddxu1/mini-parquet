@@ -1,9 +1,12 @@
 package columnar.schema
 
+import columnar.format.CompressionCodec
+
 // Row-based schema
 case class Schema(
                  columns: Seq[Column],
-                 tableName: Option[String] = None
+                 tableName: Option[String] = None,
+                 compression: CompressionCodec = CompressionCodec.NoCompression
                  ):
   require(columns.nonEmpty)
   private val columnNameSet = columns.map(_.name).toSet

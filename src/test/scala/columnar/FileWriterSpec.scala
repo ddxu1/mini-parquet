@@ -43,14 +43,14 @@ class FileWriterSpec extends AnyFlatSpec with Matchers:
 
     val chunks = writer.rowsToColumns(rows)
 
-    // "id" column: 3 integers = 3 * 4 = 12 bytes
-    chunks(0).sizeInBytes shouldBe 12
+    // "id" column: 1 byte (null bitmap for 3 rows) + 3 integers (3 * 4) = 1 + 12 = 13 bytes
+    chunks(0).sizeInBytes shouldBe 13
 
-    // "name" column: "Alice" (4+5=9) + "Bob" (4+3=7) + "Carol" (4+5=9) = 25 bytes
-    chunks(1).sizeInBytes shouldBe 25
+    // "name" column: 1 byte (bitmap) + "Alice" (4+5=9) + "Bob" (4+3=7) + "Carol" (4+5=9) = 1 + 25 = 26 bytes
+    chunks(1).sizeInBytes shouldBe 26
 
-    // "active" column: 3 booleans = 3 * 1 = 3 bytes
-    chunks(2).sizeInBytes shouldBe 3
+    // "active" column: 1 byte (bitmap) + 3 booleans (3 * 1) = 1 + 3 = 4 bytes
+    chunks(2).sizeInBytes shouldBe 4
   }
 
   it should "write a valid file with correct structure" in withTestFile("test_basic.col") { filename =>
@@ -77,6 +77,9 @@ class FileWriterSpec extends AnyFlatSpec with Matchers:
       val version = in.readByte()
       version shouldBe 1
 
+      val compression = in.readByte()
+      compression shouldBe 0  // NoCompression
+
       val columnCount = in.readInt()
       columnCount shouldBe 3
 
@@ -100,20 +103,20 @@ class FileWriterSpec extends AnyFlatSpec with Matchers:
     val in = new DataInputStream(new FileInputStream(filename))
 
     try {
-      // Skip header (13 bytes)
-      in.skip(13)
+      // Skip header (14 bytes)
+      in.skip(14)
 
       // Read first index entry
       val entry1 = ColumnIndexEntry.readFromStream(in)
 
-      // Metadata offset should be after header (13) + index (72)
-      entry1.metadataOffset should be >= 85L
+      // Metadata offset should be after header (14) + index (72)
+      entry1.metadataOffset should be >= 86L
 
       // Data offset should be after metadata section
       entry1.dataOffset should be > entry1.metadataOffset
 
-      // Data size should be 12 bytes (3 integers * 4 bytes)
-      entry1.dataSize shouldBe 12
+      // Data size should be 13 bytes (1 byte null bitmap + 3 integers * 4 bytes)
+      entry1.dataSize shouldBe 13
 
       println(s"✓ First index entry: ${entry1.summary}")
 
@@ -139,8 +142,8 @@ class FileWriterSpec extends AnyFlatSpec with Matchers:
     val raf = new RandomAccessFile(filename, "r")
 
     try {
-      // Skip to first metadata entry (header 13 + index 72 = 85)
-      raf.seek(85)
+      // Skip to first metadata entry (header 14 + index 72 = 86)
+      raf.seek(86)
 
       // Read first column metadata ("id")
       val nameLength = raf.readInt()
@@ -178,7 +181,7 @@ class FileWriterSpec extends AnyFlatSpec with Matchers:
 
     try {
       // Read index to find data offset
-      raf.seek(13)  // Skip header
+      raf.seek(14)  // Skip header
 
       val metadataOffset = raf.readLong()
       val dataOffset = raf.readLong()
@@ -189,7 +192,11 @@ class FileWriterSpec extends AnyFlatSpec with Matchers:
 
       // Read size prefix
       val size = raf.readInt()
-      size shouldBe 4
+      size shouldBe 5  // 1 byte (null bitmap) + 4 bytes (integer)
+
+      // Read null bitmap (1 byte for 1 row)
+      val bitmap = raf.readByte()
+      bitmap shouldBe 0  // not null
 
       // Read actual data
       val value = raf.readInt()
@@ -233,6 +240,7 @@ class FileWriterSpec extends AnyFlatSpec with Matchers:
     try {
       in.skip(4)  // Skip magic
       in.readByte()  // Skip version
+      in.readByte()  // Skip compression codec
       in.readInt()  // Skip column count
       val rowCount = in.readInt()
 
@@ -256,15 +264,15 @@ class FileWriterSpec extends AnyFlatSpec with Matchers:
     val actualSize = file.length()
 
     // Expected:
-    // Header: 13
+    // Header: 14
     // Index: 3 * 24 = 72
     // Metadata: ~30 (variable based on column names)
     // Data: 12 (id) + 25 (name) + 3 (active) = 40
     // Size prefixes: 3 * 4 = 12
-    // Total: ~13 + 72 + 30 + 52 = ~167 bytes
+    // Total: ~14 + 72 + 30 + 52 = ~168 bytes
 
     actualSize should be > 150L
-    actualSize should be < 200L
+    actualSize should be < 210L
 
     println(s"✓ File size: $actualSize bytes")
   }

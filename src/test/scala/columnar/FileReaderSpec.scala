@@ -11,16 +11,17 @@ class FileReaderSpec extends AnyFunSuite:
   private def writeFakeFile(path: String): Unit =
     val raf = new RandomAccessFile(new File(path), "rw")
     try
-      // HEADER (magic, version, colCount=1, rowCount=2)
+      // HEADER (magic, version, compression, colCount=1, rowCount=2)
       raf.write("COLF".getBytes())
       raf.writeByte(1)
+      raf.writeByte(0)          // compression codec: 0 = NoCompression
       raf.writeInt(1)
       raf.writeInt(2)
 
       // INDEX (24 bytes)
-      val metadataOffset = 13 + 24
+      val metadataOffset = 14 + 24
       val dataOffset = metadataOffset + 4 + 2 + 1 + 1
-      val dataSize = 8 // two ints
+      val dataSize = 9 // 1 byte bitmap + 2 ints (8 bytes)
       raf.writeLong(metadataOffset)
       raf.writeLong(dataOffset)
       raf.writeInt(dataSize)
@@ -32,8 +33,9 @@ class FileReaderSpec extends AnyFunSuite:
       raf.writeByte(1)          // type code = Int
       raf.writeByte(0)          // nullable = false
 
-      // DATA (two integers)
-      raf.writeInt(8)           // size prefix
+      // DATA (null bitmap + two integers)
+      raf.writeInt(9)           // size prefix (1 byte bitmap + 8 bytes data)
+      raf.writeByte(0)          // null bitmap: all zeros (no nulls)
       raf.writeInt(1)
       raf.writeInt(2)
     finally raf.close()

@@ -22,7 +22,7 @@ class FileWriter(schema: Schema):
     bytes
 
   /**
-   * Convert row data to column data
+   * Convert row data to column data and compress if needed.
    */
   def rowsToColumns(rows: Seq[Map[String, Option[Any]]]): Seq[ColumnChunk] =
     schema.columns.map { column =>
@@ -32,7 +32,10 @@ class FileWriter(schema: Schema):
       val bitmap = buildNullBitmap(allValues)
       val encoded = allValues.flatMap(v => Encoder.encodeValue(v, column.dataType))
       val combined = bitmap ++ encoded.toArray // bitmap, then column data encodings
-      ColumnChunk(column, combined, rows.size)
+
+      // Compress once here, not later!
+      val finalData = schema.compression.compress(combined)
+      ColumnChunk(column, finalData, rows.size)
     }
 
   /**
@@ -50,13 +53,13 @@ class FileWriter(schema: Schema):
    * This is the key method that determines where everything goes!
    */
   def buildIndexEntries(chunks: Seq[ColumnChunk]): Seq[ColumnIndexEntry] =
-    // Header (13 bytes)
+    // Header (14 bytes now - added compression codec)
     // Index (# Columns * 24 bytes)
     // Metadata (variable length)
     // Data (Variable length)
 
     // Fixed sizes
-    val headerSize = 13
+    val headerSize = 14
     val indexSize = schema.columnCount * ColumnIndexEntry.ENTRY_SIZE
 
     // Calculate metadata sizes for all columns
@@ -80,8 +83,9 @@ class FileWriter(schema: Schema):
 
       // This column's data position
       val dataOffset = currentDataOffset
+      // Data is already compressed in rowsToColumns
       val dataSize = chunk.sizeInBytes
-      currentDataOffset += 4 + dataSize  // 4 bytes for size prefix + actual data
+      currentDataOffset += 4 + dataSize  // 4 bytes for size prefix + data
 
       ColumnIndexEntry(metadataOffset, dataOffset, dataSize)
     }
@@ -91,6 +95,7 @@ class FileWriter(schema: Schema):
    * Format:
    * - Magic bytes (4 bytes): "COLF"
    * - Version (1 byte): 0x01
+   * - Compression codec (1 byte)
    * - Number of columns (4 bytes)
    * - Number of rows (4 bytes)
    */
@@ -101,6 +106,7 @@ class FileWriter(schema: Schema):
                          ): Unit =
     out.writeBytes("COLF")
     out.writeByte(1)
+    out.writeByte(schema.compression.codecId)
     out.writeInt(columnCount)
     out.writeInt(rowCount)
 
@@ -135,12 +141,13 @@ class FileWriter(schema: Schema):
    * Writes all column data to the file.
    * For each column:
    * - Size of data (4 bytes)
-   * - Actual data bytes
+   * - Actual data bytes (already compressed in rowsToColumns)
    */
   private def writeColumnData(out: DataOutputStream, chunks: Seq[ColumnChunk]): Unit =
     chunks.foreach { chunk =>
-      out.writeInt(chunk.sizeInBytes) // size
-      out.write(chunk.values) // data
+      // Data is already compressed from rowsToColumns
+      out.writeInt(chunk.sizeInBytes)
+      out.write(chunk.values)
     }
 
   /**

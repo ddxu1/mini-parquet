@@ -10,7 +10,7 @@ import scala.collection.mutable
 
 class FileReader(filePath: String):
   private val raf = new RandomAccessFile(new File(filePath), "r")
-  /** Reads 13 byte header */
+  /** Reads 14 byte header */
   private def readHeader(): FileHeader =
     raf.seek(0) // just in case, ensure we start at 0
     val magic = new Array[Byte](4)
@@ -18,9 +18,12 @@ class FileReader(filePath: String):
     val magicStr = String(magic, StandardCharsets.UTF_8)
     require(magicStr == "COLF", s"Invalid file format: magic bytes $magicStr")
     val version = raf.readByte()
+    val compressionId = raf.readByte()
+    val compression = columnar.format.CompressionCodec.fromId(compressionId)
+      .getOrElse(throw new IllegalArgumentException(s"Unknown compression codec: $compressionId"))
     val columnCount = raf.readInt()
     val rowCount = raf.readInt()
-    FileHeader(version, columnCount, rowCount)
+    FileHeader(version, compression, columnCount, rowCount)
 
   /** Reads 24 byte column index entry */
   private def readIndexEntries(colCount: Int): Seq[ColumnIndexEntry] =
@@ -59,8 +62,9 @@ class FileReader(filePath: String):
     val entry = index(idx)
     raf.seek(entry.dataOffset)
     val dataSize = raf.readInt()
-    val data = new Array[Byte](dataSize)
-    raf.readFully(data)
+    val compressedData = new Array[Byte](dataSize)
+    raf.readFully(compressedData)
+    val data = header.compression.decompress(compressedData)
     decodeColumn(data, col.dataType, header.rowCount)
 
   private def decodeColumn(data: Array[Byte], dataType: DataType, rowCount: Int): Seq[Option[Any]] =
@@ -107,10 +111,13 @@ class FileReader(filePath: String):
 
     val dataByCol = schema.columns.map { col =>
       val entry = index(schema.columns.indexOf(col))
+
       raf.seek(entry.dataOffset)
       val size = raf.readInt()
-      val bytes = new Array[Byte](size)
-      raf.readFully(bytes)
+      val compressedBytes = new Array[Byte](size)
+      raf.readFully(compressedBytes)
+      val bytes = header.compression.decompress(compressedBytes)
+
       col.name -> decodeColumn(bytes, col.dataType, header.rowCount)
     }.toMap
 

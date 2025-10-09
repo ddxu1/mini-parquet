@@ -11,6 +11,8 @@ lazy val root = (project in file("."))
       "org.scalatest" %% "scalatest" % "3.2.17" % Test,
       // For binary encoding/decoding (helpful but optional to start)
       "org.scodec" %% "scodec-core" % "2.2.0",
-      "org.scodec" %% "scodec-bits" % "1.1.38"
+      "org.scodec" %% "scodec-bits" % "1.1.38",
+      // For compression
+      "org.xerial.snappy" % "snappy-java" % "1.1.10.5"
     )
   )
